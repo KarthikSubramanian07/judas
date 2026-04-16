@@ -26,7 +26,7 @@ if "ai_draft" not in st.session_state:
 if "draft_version" not in st.session_state:
     st.session_state.draft_version = 0
 if "mode" not in st.session_state:
-    st.session_state.mode = "judas"
+    st.session_state.mode = "baseline"
 if "baseline_session" not in st.session_state:
     st.session_state.baseline_session = None
 
