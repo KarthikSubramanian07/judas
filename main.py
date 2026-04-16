@@ -4,6 +4,7 @@ from config import GROQ_API_KEY, GROQ_MODEL, MAX_TURNS
 from modules.sentry import analyze
 from modules.brain import respond
 from modules.taximeter import estimate
+from modules.strategy_engine import select as select_strategy, get_prompt
 
 st.set_page_config(page_title="JUDAS", layout="wide")
 
@@ -25,6 +26,10 @@ if "brain_response" not in st.session_state:
     st.session_state.brain_response = None
 if "tax_result" not in st.session_state:
     st.session_state.tax_result = None
+if "strategy" not in st.session_state:
+    st.session_state.strategy = None
+if "turn" not in st.session_state:
+    st.session_state.turn = 1
 
 # --- Scenario buttons ---
 st.subheader("Select a Scam Scenario")
@@ -34,11 +39,21 @@ for i, scenario in enumerate(scenarios):
     with cols[i]:
         if st.button(scenario["label"], key=scenario["id"]):
             st.session_state.selected_scenario = scenario
+            st.session_state.turn = 1
             st.session_state.sentry_result = analyze(scenario["opening"])
+
+            # Select strategy for this turn
+            scam_type = st.session_state.sentry_result["scam_type"]
+            strategy = select_strategy(turn=1, scam_type=scam_type)
+            st.session_state.strategy = strategy
+
             # Build initial history and get Brain response
             history = [{"role": "user", "content": scenario["opening"]}]
             with st.spinner("JUDAS is thinking..."):
-                st.session_state.brain_response = respond(history)
+                st.session_state.brain_response = respond(
+                    history,
+                    strategy_prompt=get_prompt(strategy)
+                )
                 st.session_state.tax_result = estimate(st.session_state.brain_response)
 
 # --- Show selected scenario + results ---
@@ -63,6 +78,12 @@ if st.session_state.selected_scenario:
         st.warning("Moderate scam indicators found.")
     else:
         st.success("Low scam indicators.")
+
+    # Strategy label
+    if st.session_state.strategy:
+        st.divider()
+        st.subheader("Active Strategy")
+        st.info(f"Turn {st.session_state.turn} — {st.session_state.strategy}")
 
     # Brain response
     st.divider()

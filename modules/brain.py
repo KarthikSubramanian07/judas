@@ -10,13 +10,14 @@ Never provide personal information, passwords, money, or account details.
 Keep responses conversational, curious, and slightly naive."""
 
 
-def respond(history: list, mode: str = "judas") -> str:
+def respond(history: list, mode: str = "judas", strategy_prompt: str = "") -> str:
     """
     Generate a response to the conversation history.
 
     Args:
-        history : list of {"role": "user"/"assistant", "content": "..."}
-        mode    : "judas" for adaptive response, "baseline" for minimal response
+        history         : list of {"role": "user"/"assistant", "content": "..."}
+        mode            : "judas" for adaptive response, "baseline" for minimal response
+        strategy_prompt : additional instruction from strategy engine
 
     Returns:
         response string
@@ -24,7 +25,12 @@ def respond(history: list, mode: str = "judas") -> str:
     if mode == "baseline":
         return "I'm not sure I understand. Can you explain more?"
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
+    # Combine base prompt with active strategy instruction
+    full_system = SYSTEM_PROMPT
+    if strategy_prompt:
+        full_system += f"\n\nActive strategy: {strategy_prompt}"
+
+    messages = [{"role": "system", "content": full_system}] + history
 
     chat_completion = client.chat.completions.create(
         model=GROQ_MODEL,
