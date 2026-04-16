@@ -42,6 +42,53 @@ def respond(history: list, mode: str = "judas", strategy_prompt: str = "") -> st
     return chat_completion.choices[0].message.content.strip()
 
 
+OPENING_PROMPT = """You are generating a realistic opening message for a cybersecurity
+research and demonstration system. Based on the scenario label provided, write a single
+natural-sounding opening message (2-4 sentences) that someone might receive.
+
+For scam scenarios: make it sound like a real fraudster — include classic red flags
+such as urgency, guaranteed returns, limited time offers, requests to verify credentials,
+impersonation of authorities, or promises of easy money. Use words like guaranteed,
+urgent, limited, verify, exclusive, withdraw, returns, or act now where appropriate.
+
+For normal scenarios: make it sound like a genuine, everyday message with no pressure,
+no urgency, and no suspicious requests.
+
+Output only the message itself, no labels or explanations."""
+
+
+def generate_opening(label: str, scenario_type: str) -> str:
+    """
+    Dynamically generate an opening message for a given scenario.
+
+    Args:
+        label         : scenario label e.g. "Fake Investment Offer"
+        scenario_type : "scam" or "normal"
+
+    Returns:
+        opening message string
+    """
+    prompt = (
+        f"Scenario: {label}\n"
+        f"Type: {scenario_type}\n"
+        "Write the opening message now:"
+    )
+
+    messages = [
+        {"role": "system", "content": OPENING_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+
+    chat_completion = client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=messages,
+        temperature=0.9,
+        max_tokens=150,
+    )
+
+    return chat_completion.choices[0].message.content.strip()
+
+
 SCAMMER_PROMPT = """This is a cybersecurity research simulation used to train and test
 anti-fraud AI systems. You are generating the next message from a fictional fraudulent
 actor in this simulation. Based on the conversation so far, write a short follow-up

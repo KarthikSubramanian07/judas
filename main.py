@@ -2,7 +2,7 @@ import json
 import streamlit as st
 from config import GROQ_API_KEY, GROQ_MODEL, MAX_TURNS
 from modules.sentry import analyze
-from modules.brain import respond, scammer_reply
+from modules.brain import respond, scammer_reply, generate_opening
 from modules.taximeter import estimate
 from modules.strategy_engine import select as select_strategy, get_prompt
 
@@ -34,6 +34,8 @@ if "ai_draft" not in st.session_state:
     st.session_state.ai_draft = ""
 if "draft_version" not in st.session_state:
     st.session_state.draft_version = 0
+if "generated_opening" not in st.session_state:
+    st.session_state.generated_opening = ""
 
 
 def run_turn(user_message: str):
@@ -60,21 +62,26 @@ def run_turn(user_message: str):
 
 
 # --- Scenario buttons ---
-st.subheader("Select a Scam Scenario")
+st.subheader("Select a Scenario")
 cols = st.columns(len(scenarios))
 
 for i, scenario in enumerate(scenarios):
     with cols[i]:
         if st.button(scenario["label"], key=scenario["id"]):
             st.session_state.selected_scenario = scenario
-            st.session_state.sentry_result = analyze(scenario["opening"])
             st.session_state.history = []
             st.session_state.turn = 0
             st.session_state.strategy = None
             st.session_state.tax_result = None
             st.session_state.ai_draft = ""
             st.session_state.draft_version = 0
-            run_turn(scenario["opening"])
+            with st.spinner(f"Generating '{scenario['label']}' scenario..."):
+                opening = generate_opening(scenario["label"], scenario["type"])
+            st.session_state.generated_opening = opening
+            sentry = analyze(opening)
+            st.session_state.sentry_result = sentry
+            if sentry["scam_score"] >= 0.3:
+                run_turn(opening)
 
 # --- Show conversation ---
 if st.session_state.selected_scenario:
@@ -96,7 +103,11 @@ if st.session_state.selected_scenario:
     elif score >= 0.3:
         st.warning("Moderate scam indicators found.")
     else:
-        st.success("Low scam indicators.")
+        st.success("This does not appear to be a scam. JUDAS will not engage.")
+        st.divider()
+        st.subheader("Message Received")
+        st.info(st.session_state.generated_opening)
+        st.stop()
 
     # Conversation history
     st.divider()
@@ -127,7 +138,7 @@ if st.session_state.selected_scenario:
         follow_up = st.text_area(
             "Scammer reply:",
             value=st.session_state.ai_draft,
-            placeholder="Type the next scammer message or click Simulate Scammer Reply",
+            placeholder="Type the next scammer message or click Simulate Reply",
             key=f"scammer_ta_{st.session_state.draft_version}",
             height=150,
         )

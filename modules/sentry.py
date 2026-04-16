@@ -11,7 +11,11 @@ CRYPTO_KEYWORDS = [
     "bitcoin", "crypto", "wallet", "investment", "guaranteed",
     "return", "double", "binance", "ethereum", "token",
     "withdraw", "profit", "passive income", "risk free",
-    "get rich", "financial freedom", "trading bot", "multiply"
+    "get rich", "financial freedom", "trading bot", "multiply",
+    "investor", "returns", "ground floor", "limited opportunity",
+    "projected", "disrupt", "per annum", "investment specialist",
+    "exclusive offer", "high returns", "substantial returns",
+    "unique opportunity", "discerning investor", "portfolio"
 ]
 
 IMPERSONATION_KEYWORDS = [
