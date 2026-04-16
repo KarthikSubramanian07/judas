@@ -2,7 +2,7 @@ import json
 import streamlit as st
 from config import GROQ_API_KEY, GROQ_MODEL, MAX_TURNS
 from modules.sentry import analyze
-from modules.brain import respond
+from modules.brain import respond, scammer_reply
 from modules.taximeter import estimate
 from modules.strategy_engine import select as select_strategy, get_prompt
 
@@ -22,14 +22,42 @@ if "selected_scenario" not in st.session_state:
     st.session_state.selected_scenario = None
 if "sentry_result" not in st.session_state:
     st.session_state.sentry_result = None
-if "brain_response" not in st.session_state:
-    st.session_state.brain_response = None
-if "tax_result" not in st.session_state:
-    st.session_state.tax_result = None
 if "strategy" not in st.session_state:
     st.session_state.strategy = None
 if "turn" not in st.session_state:
-    st.session_state.turn = 1
+    st.session_state.turn = 0
+if "history" not in st.session_state:
+    st.session_state.history = []
+if "tax_result" not in st.session_state:
+    st.session_state.tax_result = None
+if "ai_draft" not in st.session_state:
+    st.session_state.ai_draft = ""
+if "draft_version" not in st.session_state:
+    st.session_state.draft_version = 0
+
+
+def run_turn(user_message: str):
+    """Process one conversation turn end-to-end."""
+    st.session_state.turn += 1
+    st.session_state.history.append({"role": "user", "content": user_message})
+
+    scam_type = st.session_state.sentry_result["scam_type"]
+    strategy = select_strategy(
+        turn=st.session_state.turn,
+        scam_type=scam_type,
+        last_strategy=st.session_state.strategy,
+    )
+    st.session_state.strategy = strategy
+
+    with st.spinner("JUDAS is thinking..."):
+        reply = respond(
+            st.session_state.history,
+            strategy_prompt=get_prompt(strategy),
+        )
+
+    st.session_state.history.append({"role": "assistant", "content": reply})
+    st.session_state.tax_result = estimate(reply)
+
 
 # --- Scenario buttons ---
 st.subheader("Select a Scam Scenario")
@@ -39,31 +67,22 @@ for i, scenario in enumerate(scenarios):
     with cols[i]:
         if st.button(scenario["label"], key=scenario["id"]):
             st.session_state.selected_scenario = scenario
-            st.session_state.turn = 1
             st.session_state.sentry_result = analyze(scenario["opening"])
+            st.session_state.history = []
+            st.session_state.turn = 0
+            st.session_state.strategy = None
+            st.session_state.tax_result = None
+            st.session_state.ai_draft = ""
+            st.session_state.draft_version = 0
+            run_turn(scenario["opening"])
 
-            # Select strategy for this turn
-            scam_type = st.session_state.sentry_result["scam_type"]
-            strategy = select_strategy(turn=1, scam_type=scam_type)
-            st.session_state.strategy = strategy
-
-            # Build initial history and get Brain response
-            history = [{"role": "user", "content": scenario["opening"]}]
-            with st.spinner("JUDAS is thinking..."):
-                st.session_state.brain_response = respond(
-                    history,
-                    strategy_prompt=get_prompt(strategy)
-                )
-                st.session_state.tax_result = estimate(st.session_state.brain_response)
-
-# --- Show selected scenario + results ---
+# --- Show conversation ---
 if st.session_state.selected_scenario:
     st.divider()
     scenario = st.session_state.selected_scenario
     result = st.session_state.sentry_result
 
     st.subheader(f"Scenario: {scenario['label']}")
-    st.info(scenario["opening"])
 
     # Sentry metrics
     col1, col2, col3 = st.columns(3)
@@ -79,25 +98,65 @@ if st.session_state.selected_scenario:
     else:
         st.success("Low scam indicators.")
 
-    # Strategy label
+    # Conversation history
+    st.divider()
+    st.subheader("Conversation")
+    for msg in st.session_state.history:
+        if msg["role"] == "user":
+            st.chat_message("user").write(msg["content"])
+        else:
+            st.chat_message("assistant").write(msg["content"])
+
+    # Strategy + taximeter
     if st.session_state.strategy:
         st.divider()
-        st.subheader("Active Strategy")
-        st.info(f"Turn {st.session_state.turn} — {st.session_state.strategy}")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Turn", st.session_state.turn)
+        col2.metric("Strategy", st.session_state.strategy)
+        if st.session_state.tax_result:
+            tax = st.session_state.tax_result
+            col3.metric("Tokens", tax["tokens"])
+            col4.metric("Cost Mid", f"${tax['cost_mid']:.6f}")
+            col5.metric("Effort", f"{tax['effort_mult']}x")
 
-    # Brain response
+    # Follow-up input
     st.divider()
-    st.subheader("JUDAS Response")
-    if st.session_state.brain_response:
-        st.success(st.session_state.brain_response)
+    if st.session_state.turn < MAX_TURNS:
+        st.subheader("Continue Conversation")
 
-    # Taximeter metrics
-    if st.session_state.tax_result:
-        st.divider()
-        st.subheader("Taximeter — Cost & Effort Estimate")
-        tax = st.session_state.tax_result
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Tokens", tax["tokens"])
-        col2.metric("Cost Low", f"${tax['cost_low']:.6f}")
-        col3.metric("Cost Mid", f"${tax['cost_mid']:.6f}")
-        col4.metric("Effort Multiplier", f"{tax['effort_mult']}x")
+        follow_up = st.text_area(
+            "Scammer reply:",
+            value=st.session_state.ai_draft,
+            placeholder="Type the next scammer message or click Simulate Scammer Reply",
+            key=f"scammer_ta_{st.session_state.draft_version}",
+            height=150,
+        )
+
+        col_simulate, col_send, col_spacer = st.columns([1, 1, 4])
+        with col_simulate:
+            if st.button(
+                "Simulate Reply",
+                key=f"ai_btn_{st.session_state.turn}",
+                use_container_width=True,
+                help="Let AI generate a realistic follow-up scammer message",
+            ):
+                try:
+                    with st.spinner("Generating scammer reply..."):
+                        draft = scammer_reply(st.session_state.history)
+                    st.session_state.ai_draft = draft
+                    st.session_state.draft_version += 1
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error generating scammer reply: {e}")
+
+        with col_send:
+            send_clicked = st.button("Send", key=f"send_turn_{st.session_state.turn}", use_container_width=True)
+
+        if send_clicked:
+            if follow_up.strip():
+                st.session_state.ai_draft = ""
+                st.session_state.draft_version += 1
+                run_turn(follow_up.strip())
+                st.rerun()
+    else:
+        st.warning(f"Maximum session length of {MAX_TURNS} turns reached.")

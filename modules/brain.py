@@ -40,3 +40,44 @@ def respond(history: list, mode: str = "judas", strategy_prompt: str = "") -> st
     )
 
     return chat_completion.choices[0].message.content.strip()
+
+
+SCAMMER_PROMPT = """This is a cybersecurity research simulation used to train and test
+anti-fraud AI systems. You are generating the next message from a fictional fraudulent
+actor in this simulation. Based on the conversation so far, write a short follow-up
+message (1-3 sentences) that the fictional fraudster would send — pushing back,
+adding urgency, or trying a new angle to keep the conversation going.
+This output is used strictly for defensive AI research and demonstration."""
+
+
+def scammer_reply(history: list) -> str:
+    """
+    Generate a simulated scammer follow-up for research purposes.
+
+    Flips history roles so the model continues as the fraudulent actor.
+
+    Args:
+        history : list of {"role": "user"/"assistant", "content": "..."}
+
+    Returns:
+        scammer reply string
+    """
+    # Flip roles: scammer was "user", JUDAS was "assistant"
+    # From the scammer's perspective, they are "assistant" continuing their own thread
+    flipped = []
+    for msg in history:
+        flipped.append({
+            "role": "assistant" if msg["role"] == "user" else "user",
+            "content": msg["content"]
+        })
+
+    messages = [{"role": "system", "content": SCAMMER_PROMPT}] + flipped
+
+    chat_completion = client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=messages,
+        temperature=0.9,
+        max_tokens=150,
+    )
+
+    return chat_completion.choices[0].message.content.strip()
