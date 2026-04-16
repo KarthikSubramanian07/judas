@@ -1,10 +1,9 @@
 import json
 import streamlit as st
-from config import GROQ_API_KEY, GROQ_MODEL, MAX_TURNS
-from modules.sentry import analyze
-from modules.brain import respond, scammer_reply, generate_opening
-from modules.taximeter import estimate
-from modules.strategy_engine import select as select_strategy, get_prompt
+from config import MAX_TURNS
+from modules.brain import scammer_reply
+from modules.engagement_tracker import get_status_label
+from modules import session_manager
 
 st.set_page_config(page_title="JUDAS", layout="wide")
 
@@ -18,48 +17,14 @@ with open("data/scenarios.json") as f:
     scenarios = json.load(f)
 
 # --- Session state ---
+if "session" not in st.session_state:
+    st.session_state.session = None
 if "selected_scenario" not in st.session_state:
     st.session_state.selected_scenario = None
-if "sentry_result" not in st.session_state:
-    st.session_state.sentry_result = None
-if "strategy" not in st.session_state:
-    st.session_state.strategy = None
-if "turn" not in st.session_state:
-    st.session_state.turn = 0
-if "history" not in st.session_state:
-    st.session_state.history = []
-if "tax_result" not in st.session_state:
-    st.session_state.tax_result = None
 if "ai_draft" not in st.session_state:
     st.session_state.ai_draft = ""
 if "draft_version" not in st.session_state:
     st.session_state.draft_version = 0
-if "generated_opening" not in st.session_state:
-    st.session_state.generated_opening = ""
-
-
-def run_turn(user_message: str):
-    """Process one conversation turn end-to-end."""
-    st.session_state.turn += 1
-    st.session_state.history.append({"role": "user", "content": user_message})
-
-    scam_type = st.session_state.sentry_result["scam_type"]
-    strategy = select_strategy(
-        turn=st.session_state.turn,
-        scam_type=scam_type,
-        last_strategy=st.session_state.strategy,
-    )
-    st.session_state.strategy = strategy
-
-    with st.spinner("JUDAS is thinking..."):
-        reply = respond(
-            st.session_state.history,
-            strategy_prompt=get_prompt(strategy),
-        )
-
-    st.session_state.history.append({"role": "assistant", "content": reply})
-    st.session_state.tax_result = estimate(reply)
-
 
 # --- Scenario buttons ---
 st.subheader("Select a Scenario")
@@ -69,26 +34,20 @@ for i, scenario in enumerate(scenarios):
     with cols[i]:
         if st.button(scenario["label"], key=scenario["id"]):
             st.session_state.selected_scenario = scenario
-            st.session_state.history = []
-            st.session_state.turn = 0
-            st.session_state.strategy = None
-            st.session_state.tax_result = None
             st.session_state.ai_draft = ""
             st.session_state.draft_version = 0
             with st.spinner(f"Generating '{scenario['label']}' scenario..."):
-                opening = generate_opening(scenario["label"], scenario["type"])
-            st.session_state.generated_opening = opening
-            sentry = analyze(opening)
-            st.session_state.sentry_result = sentry
-            if sentry["scam_score"] >= 0.3:
-                run_turn(opening)
+                sess = session_manager.new_session()
+                sess = session_manager.start(sess, scenario["label"], scenario["type"])
+            st.session_state.session = sess
 
 # --- Show conversation ---
-if st.session_state.selected_scenario:
-    st.divider()
+if st.session_state.session:
+    sess = st.session_state.session
     scenario = st.session_state.selected_scenario
-    result = st.session_state.sentry_result
+    result = sess["sentry_result"]
 
+    st.divider()
     st.subheader(f"Scenario: {scenario['label']}")
 
     # Sentry metrics
@@ -106,33 +65,34 @@ if st.session_state.selected_scenario:
         st.success("This does not appear to be a scam. JUDAS will not engage.")
         st.divider()
         st.subheader("Message Received")
-        st.info(st.session_state.generated_opening)
+        st.info(sess["opening"])
         st.stop()
 
     # Conversation history
     st.divider()
     st.subheader("Conversation")
-    for msg in st.session_state.history:
+    for msg in sess["history"]:
         if msg["role"] == "user":
             st.chat_message("user").write(msg["content"])
         else:
             st.chat_message("assistant").write(msg["content"])
 
-    # Strategy + taximeter
-    if st.session_state.strategy:
+    # Metrics panel
+    if sess["strategy"]:
         st.divider()
-        col1, col2, col3, col4, col5 = st.columns(5)
-        col1.metric("Turn", st.session_state.turn)
-        col2.metric("Strategy", st.session_state.strategy)
-        if st.session_state.tax_result:
-            tax = st.session_state.tax_result
-            col3.metric("Tokens", tax["tokens"])
-            col4.metric("Cost Mid", f"${tax['cost_mid']:.6f}")
-            col5.metric("Effort", f"{tax['effort_mult']}x")
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1.metric("Turn", sess["turn_count"])
+        col2.metric("Messages", sess["message_count"])
+        col3.metric("Strategy", sess["strategy"])
+        col4.metric("Status", get_status_label(sess["status"]))
+        if sess["tax_result"]:
+            tax = sess["tax_result"]
+            col5.metric("Tokens", tax["tokens"])
+            col6.metric("Effort", f"{tax['effort_mult']}x")
 
     # Follow-up input
     st.divider()
-    if st.session_state.turn < MAX_TURNS:
+    if sess["status"] == "active":
         st.subheader("Continue Conversation")
 
         follow_up = st.text_area(
@@ -143,17 +103,17 @@ if st.session_state.selected_scenario:
             height=150,
         )
 
-        col_simulate, col_send, col_spacer = st.columns([1, 1, 4])
+        col_simulate, col_send, col_bye, col_spacer = st.columns([1, 1, 1, 3])
         with col_simulate:
             if st.button(
                 "Simulate Reply",
-                key=f"ai_btn_{st.session_state.turn}",
+                key=f"ai_btn_{sess['turn_count']}",
                 use_container_width=True,
                 help="Let AI generate a realistic follow-up scammer message",
             ):
                 try:
                     with st.spinner("Generating scammer reply..."):
-                        draft = scammer_reply(st.session_state.history)
+                        draft = scammer_reply(sess["history"])
                     st.session_state.ai_draft = draft
                     st.session_state.draft_version += 1
                     st.rerun()
@@ -161,13 +121,37 @@ if st.session_state.selected_scenario:
                     st.error(f"Error generating scammer reply: {e}")
 
         with col_send:
-            send_clicked = st.button("Send", key=f"send_turn_{st.session_state.turn}", use_container_width=True)
+            send_clicked = st.button(
+                "Send",
+                key=f"send_turn_{sess['turn_count']}",
+                use_container_width=True,
+            )
 
-        if send_clicked:
-            if follow_up.strip():
-                st.session_state.ai_draft = ""
-                st.session_state.draft_version += 1
-                run_turn(follow_up.strip())
-                st.rerun()
+        with col_bye:
+            bye_clicked = st.button(
+                "Bye",
+                key=f"bye_turn_{sess['turn_count']}",
+                use_container_width=True,
+                help="Simulate the scammer disengaging",
+            )
+
+        if send_clicked and follow_up.strip():
+            with st.spinner("JUDAS is thinking..."):
+                sess = session_manager.process_turn(sess, follow_up.strip())
+            st.session_state.session = sess
+            st.session_state.ai_draft = ""
+            st.session_state.draft_version += 1
+            st.rerun()
+
+        if bye_clicked:
+            with st.spinner("JUDAS is thinking..."):
+                sess = session_manager.process_turn(sess, "forget it, bye")
+            st.session_state.session = sess
+            st.session_state.ai_draft = ""
+            st.session_state.draft_version += 1
+            st.rerun()
+
+    elif sess["status"] == "disengaged":
+        st.warning("The scammer appears to have disengaged.")
     else:
         st.warning(f"Maximum session length of {MAX_TURNS} turns reached.")
