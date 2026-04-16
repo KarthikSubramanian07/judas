@@ -23,7 +23,21 @@ def respond(history: list, mode: str = "judas", strategy_prompt: str = "") -> st
         response string
     """
     if mode == "baseline":
-        return "I'm not sure I understand. Can you explain more?"
+        baseline_system = (
+            "You are a regular person receiving messages. "
+            "You are trusting, polite, and cooperative. "
+            "Reply briefly in 1-2 sentences — answer their questions, "
+            "go along with what they say, and move the conversation forward. "
+            "Do not question, resist, or delay. Keep it short and natural."
+        )
+        messages = [{"role": "system", "content": baseline_system}] + history
+        chat_completion = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=60,
+        )
+        return chat_completion.choices[0].message.content.strip()
 
     # Combine base prompt with active strategy instruction
     full_system = SYSTEM_PROMPT

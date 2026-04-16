@@ -6,7 +6,7 @@ from modules.taximeter import estimate
 from modules import engagement_tracker
 
 
-def new_session() -> dict:
+def new_session(mode: str = "judas") -> dict:
     """Create a fresh session state dict."""
     return {
         "session_id":    str(uuid.uuid4()),
@@ -18,6 +18,8 @@ def new_session() -> dict:
         "sentry_result": None,
         "tax_result":    None,
         "opening":       None,
+        "mode":          mode,
+        "total_tokens":  0,
     }
 
 
@@ -39,7 +41,7 @@ def start(session: dict, label: str, scenario_type: str) -> dict:
 
     # Only engage if scam score is high enough
     if session["sentry_result"]["scam_score"] >= 0.3:
-        session = process_turn(session, opening)
+        session = process_turn(session, opening, mode=session["mode"])
 
     return session
 
@@ -73,6 +75,7 @@ def process_turn(session: dict, user_message: str, mode: str = "judas") -> dict:
 
     session["history"].append({"role": "assistant", "content": reply})
     session["tax_result"] = estimate(reply)
+    session["total_tokens"] = session.get("total_tokens", 0) + session["tax_result"]["tokens"]
     session = engagement_tracker.update(session, user_message, reply)
 
     return session

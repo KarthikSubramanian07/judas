@@ -35,8 +35,8 @@ col_mode, col_spacer = st.columns([2, 6])
 with col_mode:
     mode = st.radio(
         "Mode",
-        options=["judas", "baseline"],
-        format_func=lambda x: "JUDAS" if x == "judas" else "Baseline",
+        options=["baseline", "judas"],
+        format_func=lambda x: "Baseline" if x == "baseline" else "JUDAS",
         horizontal=True,
         key="mode_radio",
     )
@@ -46,6 +46,26 @@ with col_mode:
         st.session_state.ai_draft = ""
         st.session_state.draft_version = 0
         st.rerun()
+
+# --- Instructions ---
+if st.session_state.mode == "baseline":
+    st.info(
+        "**Baseline Mode** — Simulates a cooperative, non-resistant respondent.\n\n"
+        "1. Select a scam scenario below to generate a realistic scam message.\n"
+        "2. Click **Simulate Reply** to generate a scammer follow-up, or type your own.\n"
+        "3. Click **Send** to see how a normal person responds — brief and cooperative.\n"
+        "4. Click **Bye** when done. Note the turn count and tokens used.\n"
+        "5. Switch to **JUDAS mode** and run the same scenario to compare results."
+    )
+else:
+    st.info(
+        "**JUDAS Mode** — Adaptive AI that wastes scammer time using rotating strategies.\n\n"
+        "1. Select a scam scenario below to generate a realistic scam message.\n"
+        "2. Click **Simulate Reply** to generate a scammer follow-up, or type your own.\n"
+        "3. Click **Send** to see JUDAS respond — evasive, confused, and time-consuming.\n"
+        "4. Watch the **Strategy** change as the conversation progresses.\n"
+        "5. Click **Bye** to end the session and view the comparison analysis."
+    )
 
 st.divider()
 
