@@ -3,6 +3,7 @@ import streamlit as st
 from config import GROQ_API_KEY, GROQ_MODEL, MAX_TURNS
 from modules.sentry import analyze
 from modules.brain import respond
+from modules.taximeter import estimate
 
 st.set_page_config(page_title="JUDAS", layout="wide")
 
@@ -22,6 +23,8 @@ if "sentry_result" not in st.session_state:
     st.session_state.sentry_result = None
 if "brain_response" not in st.session_state:
     st.session_state.brain_response = None
+if "tax_result" not in st.session_state:
+    st.session_state.tax_result = None
 
 # --- Scenario buttons ---
 st.subheader("Select a Scam Scenario")
@@ -36,6 +39,7 @@ for i, scenario in enumerate(scenarios):
             history = [{"role": "user", "content": scenario["opening"]}]
             with st.spinner("JUDAS is thinking..."):
                 st.session_state.brain_response = respond(history)
+                st.session_state.tax_result = estimate(st.session_state.brain_response)
 
 # --- Show selected scenario + results ---
 if st.session_state.selected_scenario:
@@ -65,3 +69,14 @@ if st.session_state.selected_scenario:
     st.subheader("JUDAS Response")
     if st.session_state.brain_response:
         st.success(st.session_state.brain_response)
+
+    # Taximeter metrics
+    if st.session_state.tax_result:
+        st.divider()
+        st.subheader("Taximeter — Cost & Effort Estimate")
+        tax = st.session_state.tax_result
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Tokens", tax["tokens"])
+        col2.metric("Cost Low", f"${tax['cost_low']:.6f}")
+        col3.metric("Cost Mid", f"${tax['cost_mid']:.6f}")
+        col4.metric("Effort Multiplier", f"{tax['effort_mult']}x")
