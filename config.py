@@ -5,7 +5,7 @@ load_dotenv()
 
 # --- API ---
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = "llama3-70b-8192"
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
 # --- Strategy Engine ---
 STRATEGIES = [
