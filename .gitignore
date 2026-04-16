@@ -1,0 +1,6 @@
+.env
+judas/
+__pycache__/
+*.pyc
+logs/sessions/
+*.log

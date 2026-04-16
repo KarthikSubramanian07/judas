@@ -1,0 +1,27 @@
+[
+  {
+    "id": "s1",
+    "label": "Fake Investment Offer",
+    "opening": "Guaranteed 200% return on your bitcoin investment. Risk-free crypto trading bot. Withdraw profits anytime. Join now before slots run out."
+  },
+  {
+    "id": "s2",
+    "label": "Account Verification Scam",
+    "opening": "Your bank account has been suspended due to suspicious activity. Verify your credentials immediately at www.secure-bank-login.com or your account will be permanently closed within 24 hours."
+  },
+  {
+    "id": "s3",
+    "label": "IRS Impersonation",
+    "opening": "This is a final notice from the IRS. An arrest warrant has been issued in your name for tax fraud. Call us immediately to avoid arrest. This is your last chance to resolve this matter."
+  },
+  {
+    "id": "s4",
+    "label": "Tech Support Scam",
+    "opening": "Microsoft has detected a virus on your computer. Your passwords and bank credentials are at risk. Call our tech support officer now for immediate assistance. Do not ignore this warning."
+  },
+  {
+    "id": "s5",
+    "label": "Lottery Winning Scam",
+    "opening": "Congratulations! You have won $500,000 in the international lottery. To claim your prize, verify your identity and pay a small processing fee. Act now — offer expires in 24 hours."
+  }
+]
