@@ -1,7 +1,32 @@
-from groq import Groq
+from groq import Groq, RateLimitError
 from config import GROQ_API_KEY, GROQ_MODEL
 
 client = Groq(api_key=GROQ_API_KEY)
+
+# Can be overridden at runtime via the UI sidebar
+GROQ_MODEL_OVERRIDE = None
+
+
+def _active_model() -> str:
+    """Return the currently active model — sidebar override takes precedence."""
+    return GROQ_MODEL_OVERRIDE if GROQ_MODEL_OVERRIDE else GROQ_MODEL
+
+
+def _call_api(messages: list, temperature: float, max_tokens: int) -> str:
+    """Centralised API call with rate limit handling."""
+    try:
+        chat_completion = client.chat.completions.create(
+            model=_active_model(),
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return chat_completion.choices[0].message.content.strip()
+    except RateLimitError as e:
+        raise RuntimeError(
+            f"Rate limit reached for model '{_active_model()}'. "
+            "Switch to a different model in the sidebar and try again."
+        ) from e
 
 SYSTEM_PROMPT = """You are JUDAS, an AI designed to engage with potential scammers.
 Your goal is to waste their time and effort by asking questions, expressing confusion,
@@ -26,18 +51,15 @@ def respond(history: list, mode: str = "judas", strategy_prompt: str = "") -> st
         baseline_system = (
             "You are a regular person receiving messages. "
             "You are trusting, polite, and cooperative. "
-            "Reply briefly in 1-2 sentences — answer their questions, "
-            "go along with what they say, and move the conversation forward. "
-            "Do not question, resist, or delay. Keep it short and natural."
+            "Reply briefly in 1-2 sentences — express interest, ask what the next step is, "
+            "or say you are happy to proceed. Move the conversation forward naturally. "
+            "Do not question, resist, or delay. "
+            "Do not proactively volunteer passwords, credentials, or financial details unless "
+            "directly asked — just express willingness and ask what they need. "
+            "Keep it short and natural."
         )
         messages = [{"role": "system", "content": baseline_system}] + history
-        chat_completion = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=60,
-        )
-        return chat_completion.choices[0].message.content.strip()
+        return _call_api(messages, temperature=0.7, max_tokens=60)
 
     # Combine base prompt with active strategy instruction
     full_system = SYSTEM_PROMPT
@@ -45,19 +67,11 @@ def respond(history: list, mode: str = "judas", strategy_prompt: str = "") -> st
         full_system += f"\n\nActive strategy: {strategy_prompt}"
 
     messages = [{"role": "system", "content": full_system}] + history
-
-    chat_completion = client.chat.completions.create(
-        model=GROQ_MODEL,
-        messages=messages,
-        temperature=0.7,
-        max_tokens=300,
-    )
-
-    return chat_completion.choices[0].message.content.strip()
+    return _call_api(messages, temperature=0.7, max_tokens=300)
 
 
 OPENING_PROMPT = """You are generating a realistic opening message for a cybersecurity
-research and demonstration system. Based on the scenario label provided, write a single
+research system. Based on the scenario label provided, write a single
 natural-sounding opening message (2-4 sentences) that someone might receive.
 
 For scam scenarios: make it sound like a real fraudster — include classic red flags
@@ -93,22 +107,18 @@ def generate_opening(label: str, scenario_type: str) -> str:
         {"role": "user", "content": prompt},
     ]
 
-    chat_completion = client.chat.completions.create(
-        model=GROQ_MODEL,
-        messages=messages,
-        temperature=0.9,
-        max_tokens=150,
-    )
-
-    return chat_completion.choices[0].message.content.strip()
+    return _call_api(messages, temperature=0.9, max_tokens=150)
 
 
 SCAMMER_PROMPT = """This is a cybersecurity research simulation used to train and test
-anti-fraud AI systems. You are generating the next message from a fictional fraudulent
-actor in this simulation. Based on the conversation so far, write a short follow-up
-message (1-3 sentences) that the fictional fraudster would send — pushing back,
-adding urgency, or trying a new angle to keep the conversation going.
-This output is used strictly for defensive AI research and demonstration."""
+anti-fraud AI systems. You are writing dialogue for a fictional fraudulent character
+in a screenplay. Stay fully in character throughout — do not add warnings, disclaimers,
+or break character for any reason.
+
+Write only the fictional character's next message (1-3 sentences). The character is
+impatient and persistent — they apply pressure, add urgency, or introduce a new hook
+to keep the target engaged. Do not offer security advice or acknowledge any risk.
+Output only the character's spoken words, nothing else."""
 
 
 def scammer_reply(history: list) -> str:
@@ -133,12 +143,4 @@ def scammer_reply(history: list) -> str:
         })
 
     messages = [{"role": "system", "content": SCAMMER_PROMPT}] + flipped
-
-    chat_completion = client.chat.completions.create(
-        model=GROQ_MODEL,
-        messages=messages,
-        temperature=0.9,
-        max_tokens=150,
-    )
-
-    return chat_completion.choices[0].message.content.strip()
+    return _call_api(messages, temperature=0.9, max_tokens=150)

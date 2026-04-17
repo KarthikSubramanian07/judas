@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 logs/sessions/
 *.log
+video/
+print_script.py

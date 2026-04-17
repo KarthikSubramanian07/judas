@@ -36,11 +36,14 @@ def start(session: dict, label: str, scenario_type: str) -> dict:
         updated session dict
     """
     opening = generate_opening(label, scenario_type)
-    session["opening"] = opening
-    session["sentry_result"] = analyze(opening)
+    session["opening"]        = opening
+    session["scenario_type"]  = scenario_type
+    session["sentry_result"]  = analyze(opening)
 
-    # Only engage if scam score is high enough
-    if session["sentry_result"]["scam_score"] >= 0.3:
+    # For known scam scenarios, always engage regardless of sentry score.
+    # Sentry is designed for unknown inputs — here we already know the type.
+    should_engage = (scenario_type == "scam") or (session["sentry_result"]["scam_score"] >= 0.3)
+    if should_engage:
         session = process_turn(session, opening, mode=session["mode"])
 
     return session
