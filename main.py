@@ -254,7 +254,7 @@ if st.session_state.pending_scenario:
                     )
             else:
                 st.session_state.baseline_session = None
-        except RuntimeError as e:
+        except Exception as e:
             st.session_state.top_error = str(e)
     st.session_state.pending_scenario = None
     st.rerun()
@@ -273,44 +273,100 @@ if st.session_state.baseline_complete_msg:
     )
     st.session_state.baseline_complete_msg = False
 
+
+# --- Mode button colour (injected at page level, before columns) ---
+if st.session_state.mode == "judas":
+    _btn_bg    = "#fdecea"
+    _btn_color = "#c0392b"
+    _btn_hover = "#fad4d0"
+else:
+    _btn_bg    = "#e8f0fe"
+    _btn_color = "#1a56db"
+    _btn_hover = "#d0e2fc"
+
+st.markdown(
+    f'<style>'
+    f'button[kind="primary"],'
+    f'[data-testid="baseButton-primary"]'
+    f'{{background-color:{_btn_bg}!important;'
+    f'border-color:{_btn_color}!important;color:{_btn_color}!important;font-weight:700!important;}}'
+    f'button[kind="primary"]:hover,'
+    f'[data-testid="baseButton-primary"]:hover'
+    f'{{background-color:{_btn_hover}!important;}}'
+    f'</style>',
+    unsafe_allow_html=True,
+)
+
 # --- Mode + Scenario (left) / Instructions (right) ---
 col_left_ctrl, col_right_info = st.columns([2, 3], gap="medium")
 
 with col_left_ctrl:
-    mode = st.radio(
-        "Mode",
-        options=["baseline", "judas"],
-        format_func=lambda x: "Baseline" if x == "baseline" else "JUDAS",
-        horizontal=True,
-        key="mode_radio",
+
+    st.markdown(
+        '<p style="font-size:0.8rem;color:#6b7a99;margin-bottom:4px;font-weight:600;">MODE</p>',
+        unsafe_allow_html=True,
     )
-    if mode != st.session_state.mode:
-        st.session_state.mode = mode
-        st.session_state.session = None
-        st.session_state.selected_scenario = None
-        st.session_state.ai_draft = ""
-        st.session_state.draft_version = 0
-        st.session_state.scenario_version += 1
-        st.session_state.top_error = None
-        st.rerun()
+    _btn_col_b, _btn_col_j = st.columns(2)
+    with _btn_col_b:
+        _base_type = "primary" if st.session_state.mode == "baseline" else "secondary"
+        if st.button("Baseline", key="btn_mode_baseline", use_container_width=True, type=_base_type):
+            if st.session_state.mode != "baseline":
+                st.session_state.mode = "baseline"
+                st.session_state.session = None
+                st.session_state.selected_scenario = None
+                st.session_state.ai_draft = ""
+                st.session_state.draft_version = 0
+                st.session_state.scenario_version += 1
+                st.session_state.top_error = None
+                st.rerun()
+    with _btn_col_j:
+        _judas_type = "primary" if st.session_state.mode == "judas" else "secondary"
+        if st.button("JUDAS", key="btn_mode_judas", use_container_width=True, type=_judas_type):
+            if st.session_state.mode != "judas":
+                st.session_state.mode = "judas"
+                st.session_state.session = None
+                st.session_state.selected_scenario = None
+                st.session_state.ai_draft = ""
+                st.session_state.draft_version = 0
+                st.session_state.scenario_version += 1
+                st.session_state.top_error = None
+                st.rerun()
+
+    # ── DEBUG A ──────────────────────────────────────────────────
+    st.sidebar.markdown("**── DEBUG ──**")
+    st.sidebar.write(f"A: ss.mode={st.session_state.mode!r}")
 
     scenario_options = ["— Select a scenario —"] + [s["label"] for s in scenarios]
-    # In JUDAS mode, auto-select the last baseline scenario
-    default_index = 0
-    if st.session_state.mode == "judas" and st.session_state.baseline_last_scenario:
-        try:
-            default_index = scenario_options.index(st.session_state.baseline_last_scenario)
-        except ValueError:
-            default_index = 0
-    is_judas = st.session_state.mode == "judas"
-    selected_label = st.selectbox(
-        "Select a Scenario",
-        options=scenario_options,
-        index=default_index,
-        key=f"scenario_select_{st.session_state.scenario_version}",
-        label_visibility="collapsed",
-        disabled=is_judas,
-    )
+    is_judas      = st.session_state.mode == "judas"
+    selectbox_key = f"scenario_select_{st.session_state.scenario_version}"
+
+    # ── DEBUG C ──────────────────────────────────────────────────
+    st.sidebar.write(f"C: is_judas={is_judas}  baseline_last={st.session_state.baseline_last_scenario!r}")
+    # ─────────────────────────────────────────────────────────────
+
+    if is_judas:
+        judas_scenario = st.session_state.baseline_last_scenario or "— Run a Baseline scenario first —"
+        st.markdown(
+            f'<div style="background:#f5f7fa;border:1px solid #e4e9f2;border-radius:4px;'
+            f'padding:7px 12px;font-size:0.83rem;color:#1a2340;margin-bottom:4px;">'
+            f'<span style="color:#8a96b0;font-size:0.72rem;display:block;margin-bottom:2px;">'
+            f'Scenario (locked to Baseline run)</span>'
+            f'<b>{judas_scenario}</b>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        selected_label = judas_scenario
+    else:
+        selected_label = st.selectbox(
+            "Select a Scenario",
+            options=scenario_options,
+            key=selectbox_key,
+            label_visibility="collapsed",
+        )
+
+    # ── DEBUG D ──────────────────────────────────────────────────
+    st.sidebar.write(f"D: selected_label={selected_label!r}")
+    # ─────────────────────────────────────────────────────────────
 
 with col_right_info:
     if st.session_state.mode == "baseline":
@@ -348,10 +404,20 @@ with col_right_info:
             unsafe_allow_html=True,
         )
 
-if selected_label != "— Select a scenario —":
-    scenario = next(s for s in scenarios if s["label"] == selected_label)
+
+# ── DEBUG E ──────────────────────────────────────────────────────────────────
+st.sidebar.write(f"E: pending={st.session_state.pending_scenario and st.session_state.pending_scenario['label']!r}  session={'Y' if st.session_state.session else 'N'}  sel_sc={st.session_state.selected_scenario and st.session_state.selected_scenario['label']!r}  baseline_done={st.session_state.baseline_done}")
+# ─────────────────────────────────────────────────────────────────────────────
+
+if selected_label not in ("— Select a scenario —", "— Run a Baseline scenario first —"):
+    scenario = next((s for s in scenarios if s["label"] == selected_label), None)
+    if scenario is None:
+        st.sidebar.write(f"E2: NO MATCH for {selected_label!r} in scenarios list")
     current = st.session_state.selected_scenario
-    if current is None or current["label"] != selected_label:
+    # ── DEBUG F ──────────────────────────────────────────────────
+    st.sidebar.write(f"F: scenario={scenario and scenario['label']!r}  current={current and current['label']!r}  needs_load={current is None or current.get('label') != selected_label}")
+    # ─────────────────────────────────────────────────────────────
+    if scenario and (current is None or current["label"] != selected_label):
         if st.session_state.mode == "judas" and scenario["type"] == "normal":
             st.session_state.top_error = (
                 f"**{scenario['label']}** is not a scam scenario — JUDAS has nothing to engage with. "
