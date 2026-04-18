@@ -1,6 +1,32 @@
+"""
+strategy_engine.py
+------------------
+Manages JUDAS's five rotating engagement strategies.
+
+Each strategy is a distinct behavioural persona that JUDAS adopts as the
+conversation progresses. Strategies are selected by turn number — earlier
+turns use lighter, more plausible confusion; later turns introduce
+increasing friction and demands.
+
+Strategy rotation:
+  Turn 1       → Naive Inquiry
+  Turns 2–3    → Technical Expansion
+  Turns 4–5    → Constraint Injection
+  Turns 6–7    → Recursive Clarification
+  Turn 8+      → Format Enforcement
+
+Used by: session_manager.process_turn() — selects strategy and retrieves
+         its prompt on every turn
+         main.py — strategy names shown in Session Metrics box and sidebar expanders
+"""
+
 from config import STRATEGIES
 
-# Strategy prompts — each shapes how JUDAS responds
+# ---------------------------------------------------------------------------
+# Strategy prompt library
+# Each entry is the instruction appended to the JUDAS system prompt for
+# that strategy. Written to guide tone, not to script exact responses.
+# ---------------------------------------------------------------------------
 STRATEGY_PROMPTS = {
     "Naive Inquiry": (
         "Respond like a genuinely confused but friendly person. Ask one simple, "
@@ -47,15 +73,22 @@ STRATEGY_PROMPTS = {
 
 def select(turn: int, scam_type: str, last_strategy: str = None) -> str:
     """
-    Select a strategy based on session state.
+    Select the appropriate strategy for the current turn.
+
+    Strategy is chosen purely by turn number. The scam_type and
+    last_strategy arguments are accepted for future extensibility
+    (e.g. adapting strategy based on scam category) but are not
+    currently used in the selection logic.
 
     Args:
         turn          : current turn number (1-based)
-        scam_type     : detected scam type from Sentry
-        last_strategy : strategy used in previous turn
+        scam_type     : scam type from Sentry ("phishing", "crypto", etc.) — reserved
+        last_strategy : strategy name from the previous turn — reserved
 
     Returns:
-        strategy name string
+        strategy name string (one of the five keys in STRATEGY_PROMPTS)
+
+    Called by: session_manager.process_turn()
     """
     if turn == 1:
         return "Naive Inquiry"
@@ -70,5 +103,18 @@ def select(turn: int, scam_type: str, last_strategy: str = None) -> str:
 
 
 def get_prompt(strategy: str) -> str:
-    """Return the system prompt addition for a given strategy."""
+    """
+    Return the system prompt instruction for a given strategy name.
+
+    The prompt is appended to JUDAS's base system prompt in brain.respond()
+    to shape the tone and behaviour of the response for that turn.
+
+    Args:
+        strategy: strategy name string (must match a key in STRATEGY_PROMPTS)
+
+    Returns:
+        prompt string, or empty string if strategy name is not found
+
+    Called by: session_manager.process_turn()
+    """
     return STRATEGY_PROMPTS.get(strategy, "")
