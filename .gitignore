@@ -6,3 +6,4 @@ logs/sessions/
 *.log
 video/
 print_script.py
+.claude/

@@ -195,6 +195,9 @@ st.markdown("""
     <p style="color:#8a96b0; font-size:0.85rem; letter-spacing:2px; margin-top:4px;">
         DETECT &nbsp;·&nbsp; ENGAGE &nbsp;·&nbsp; EXHAUST
     </p>
+    <p style="color:#6b7a99; font-size:0.82rem; font-style:italic; margin-top:6px; letter-spacing:0.3px;">
+        Making AI-powered fraud expensive, one wasted minute at a time.
+    </p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -229,6 +232,46 @@ if "baseline_last_scenario" not in st.session_state:
     st.session_state.baseline_last_scenario = None
 if "scroll_to_analysis" not in st.session_state:
     st.session_state.scroll_to_analysis = False
+if "baseline_complete_msg" not in st.session_state:
+    st.session_state.baseline_complete_msg = False
+if "pending_scenario" not in st.session_state:
+    st.session_state.pending_scenario = None
+
+# --- Two-phase scenario loading (runs before columns to avoid stale-content duplication) ---
+if st.session_state.pending_scenario:
+    pending = st.session_state.pending_scenario
+    with st.spinner(f"Generating '{pending['label']}' scenario..."):
+        try:
+            sess = session_manager.new_session(mode=st.session_state.mode)
+            sess = session_manager.start(sess, pending["label"], pending["type"])
+            st.session_state.session = sess
+            if st.session_state.mode == "baseline":
+                st.session_state.baseline_done = True
+                st.session_state.baseline_last_scenario = pending["label"]
+                if sess["turn_count"] > 0:
+                    st.session_state.baseline_avg_tokens = round(
+                        sess["total_tokens"] / sess["turn_count"], 1
+                    )
+            else:
+                st.session_state.baseline_session = None
+        except RuntimeError as e:
+            st.session_state.top_error = str(e)
+    st.session_state.pending_scenario = None
+    st.rerun()
+
+# Show soft popup once after baseline bye — fades out after 8 seconds
+if st.session_state.baseline_complete_msg:
+    st.markdown(
+        '<div style="position:fixed;bottom:28px;right:28px;z-index:9999;'
+        'background:#2e7d32;color:#ffffff;padding:12px 18px;border-radius:8px;'
+        'font-size:0.84rem;font-family:sans-serif;box-shadow:0 4px 14px rgba(0,0,0,0.22);'
+        'animation:judas-fadeout 0.6s ease 8s forwards;">'
+        '&#10003;&nbsp; Baseline complete — switch to <b>JUDAS</b> mode to compare.'
+        '</div>'
+        '<style>@keyframes judas-fadeout{from{opacity:1}to{opacity:0}}</style>',
+        unsafe_allow_html=True,
+    )
+    st.session_state.baseline_complete_msg = False
 
 # --- Mode + Scenario (left) / Instructions (right) ---
 col_left_ctrl, col_right_info = st.columns([2, 3], gap="medium")
@@ -330,20 +373,8 @@ if selected_label != "— Select a scenario —":
             st.session_state.session = None
             st.session_state.ai_draft = ""
             st.session_state.draft_version = 0
-            try:
-                with st.spinner(f"Generating '{scenario['label']}' scenario..."):
-                    sess = session_manager.new_session(mode=st.session_state.mode)
-                    sess = session_manager.start(sess, scenario["label"], scenario["type"])
-                st.session_state.session = sess
-                if st.session_state.mode == "baseline":
-                    st.session_state.baseline_done = True
-                    st.session_state.baseline_last_scenario = scenario["label"]
-                    if sess["turn_count"] > 0:
-                        st.session_state.baseline_avg_tokens = round(sess["total_tokens"] / sess["turn_count"], 1)
-                else:
-                    st.session_state.baseline_session = None
-            except RuntimeError as e:
-                st.session_state.top_error = str(e)
+            st.session_state.pending_scenario = scenario
+            st.rerun()
 
 # --- Persistent error banner ---
 if st.session_state.top_error:
@@ -366,9 +397,32 @@ if st.session_state.session:
             st.warning("Baseline Mode")
 
     # Sentry metrics
-    col1, col2 = st.columns(2)
-    col1.metric("Scam Score", result["scam_score"])
+    score_pct = round(result["scam_score"] * 100)
+    if score_pct >= 70:
+        conf_label = "High"
+        conf_color = "#c0392b"
+        conf_bg    = "#fdecea"
+    elif score_pct >= 40:
+        conf_label = "Medium"
+        conf_color = "#d97706"
+        conf_bg    = "#fff8e8"
+    else:
+        conf_label = "Low"
+        conf_color = "#2e7d32"
+        conf_bg    = "#edf7ee"
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Scam Score", f"{score_pct}%")
     col2.metric("Scam Type", result["scam_type"].capitalize())
+    col3.markdown(
+        f'<div style="background:{conf_bg};border:1px solid {conf_color};border-radius:10px;'
+        f'padding:12px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">'
+        f'<div style="color:#6b7a99;font-size:0.78rem;font-weight:500;">Detection Confidence</div>'
+        f'<div style="color:{conf_color};font-size:1.1rem;font-weight:700;margin-top:4px;">'
+        f'{conf_label} &nbsp;({score_pct}%)</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
     score = result["scam_score"]
     is_known_scam = sess.get("scenario_type") == "scam"
@@ -403,15 +457,28 @@ if st.session_state.session:
                         st.write(msg["content"])
 
     with col_right:
+        # Pre-initialise so handlers below can reference these regardless of active state
+        follow_up    = ""
+        send_clicked = False
+        bye_clicked  = False
+
         if sess["status"] == "active":
             st.subheader("Continue Conversation")
+
+            lbl_col, gen_col = st.columns([2, 3])
+            lbl_col.markdown(
+                '<span style="font-size:0.82rem;color:#3a4a6b;font-weight:500;">Scammer reply</span>',
+                unsafe_allow_html=True,
+            )
+            gen_placeholder = gen_col.empty()
 
             follow_up = st.text_area(
                 "Scammer reply:",
                 value=st.session_state.ai_draft,
                 placeholder="Type the next scammer message or click Simulate Reply",
                 key=f"scammer_ta_{st.session_state.draft_version}",
-                height=180,
+                height=160,
+                label_visibility="collapsed",
             )
 
             col_simulate, col_send, col_bye = st.columns([1, 1, 1])
@@ -423,8 +490,12 @@ if st.session_state.session:
                     help="Let AI generate a realistic follow-up scammer message",
                 ):
                     try:
-                        with st.spinner("Generating scammer reply..."):
-                            draft = scammer_reply(sess["history"])
+                        gen_placeholder.markdown(
+                            '<span style="font-size:0.82rem;color:#c0392b;font-style:italic;">'
+                            'Generating reply…</span>',
+                            unsafe_allow_html=True,
+                        )
+                        draft = scammer_reply(sess["history"])
                         st.session_state.ai_draft = draft
                         st.session_state.draft_version += 1
                         st.rerun()
@@ -445,34 +516,6 @@ if st.session_state.session:
                     use_container_width=True,
                     help="Simulate the scammer disengaging",
                 )
-
-            if send_clicked and follow_up.strip():
-                try:
-                    with st.spinner("JUDAS is thinking..."):
-                        sess = session_manager.process_turn(sess, follow_up.strip(), mode=sess["mode"])
-                    st.session_state.session = sess
-                    if sess["mode"] == "baseline" and sess["turn_count"] > 0:
-                        st.session_state.baseline_avg_tokens = round(sess["total_tokens"] / sess["turn_count"], 1)
-                    st.session_state.ai_draft = ""
-                    st.session_state.draft_version += 1
-                    st.rerun()
-                except RuntimeError as e:
-                    st.error(str(e))
-
-            if bye_clicked:
-                try:
-                    with st.spinner("JUDAS is thinking..."):
-                        sess = session_manager.process_turn(sess, "forget it, bye", mode=sess["mode"])
-                    st.session_state.session = sess
-                    if sess["mode"] == "baseline" and sess["turn_count"] > 0:
-                        st.session_state.baseline_avg_tokens = round(sess["total_tokens"] / sess["turn_count"], 1)
-                    if sess["mode"] == "judas":
-                        st.session_state.scroll_to_analysis = True
-                    st.session_state.ai_draft = ""
-                    st.session_state.draft_version += 1
-                    st.rerun()
-                except RuntimeError as e:
-                    st.error(str(e))
         else:
             st.subheader("Session Ended")
             st.markdown(
@@ -483,68 +526,127 @@ if st.session_state.session:
                 unsafe_allow_html=True,
             )
 
-    # Metrics panel — shown below the input section
-    if sess["strategy"] or sess["mode"] == "baseline":
-        st.divider()
-        st.subheader("Session Metrics")
+        # --- Session Metrics box — sits below continue/ended in the right column ---
+        if sess["strategy"] or sess["mode"] == "baseline":
+            baseline_per_turn = st.session_state.baseline_avg_tokens or BASELINE_TOKENS_PER_TURN
+            baseline_source   = "measured from your last Baseline run" if st.session_state.baseline_avg_tokens else "estimated (~10 words \u00d7 1.3 tokens/word)"
+            turns             = max(sess["turn_count"], 1)
+            baseline_total    = turns * baseline_per_turn
+            judas_total       = sess["total_tokens"]
+            session_effort    = round(judas_total / baseline_total, 1) if judas_total else 0.0
 
-        strategy_tooltip = (
-            "Naive Inquiry — Plays confused, asks simple innocent questions to slow things down.\n"
-            "Technical Expansion — Requests reference numbers, supervisor names, callback numbers.\n"
-            "Constraint Injection — Introduces realistic personal obstacles to delay action.\n"
-            "Recursive Clarification — Loops back and re-asks earlier questions from the start.\n"
-            "Format Enforcement — Demands written confirmation, email, or physical address."
-        )
-        baseline_per_turn  = st.session_state.baseline_avg_tokens or BASELINE_TOKENS_PER_TURN
-        baseline_source    = "measured from your last Baseline run" if st.session_state.baseline_avg_tokens else "estimated (~10 words \u00d7 1.3 tokens/word)"
-        turns              = max(sess["turn_count"], 1)
-        baseline_total     = turns * baseline_per_turn
-        judas_total        = sess["total_tokens"]
-        session_effort     = round(judas_total / baseline_total, 1) if judas_total else 0.0
-
-        effort_tooltip = (
-            f"Effort Multiplier = JUDAS tokens \u00f7 (turns \u00d7 baseline tokens per turn)\n"
-            f"= {judas_total} \u00f7 ({turns} \u00d7 {baseline_per_turn})\n"
-            f"= {judas_total} \u00f7 {baseline_total}\n"
-            f"= {session_effort}x\n\n"
-            f"Baseline tokens per turn: {baseline_per_turn} ({baseline_source}).\n"
-            f"A cooperative target would generate ~{baseline_total} tokens across {turns} turn(s).\n"
-            f"JUDAS generated {judas_total} tokens — {session_effort}x more content for the scammer to process."
-        )
-
-        tokens_val = str(judas_total) if sess["tax_result"] else "—"
-
-        rows = (
-            f"<tr><td>Turn</td><td>{sess['turn_count']}</td></tr>"
-            f"<tr><td>Messages</td><td>{sess['message_count']}</td></tr>"
-            f"<tr><td>Status</td><td>{get_status_label(sess['status'])}</td></tr>"
-            f"<tr><td>Tokens</td><td>{tokens_val}</td></tr>"
-        )
-
-        if sess["mode"] == "judas":
-            strategy_val = sess["strategy"] or "—"
-            effort_val   = f"{session_effort}x" if sess["tax_result"] else "—"
-            rows += (
-                f"<tr><td>Strategy &nbsp;"
-                f'<span title="{strategy_tooltip}" style="cursor:help;color:#4a6cf7;font-weight:700;">&#9432;</span>'
-                f"</td><td>{strategy_val}</td></tr>"
-                f"<tr><td>Effort &nbsp;"
-                f'<span title="{effort_tooltip}" style="cursor:help;color:#4a6cf7;font-weight:700;">&#9432;</span>'
-                f"</td><td>{effort_val}</td></tr>"
+            strategy_tooltip = (
+                "Naive Inquiry \u2014 Plays confused, asks simple innocent questions to slow things down.&#10;"
+                "Technical Expansion \u2014 Requests reference numbers, supervisor names, callback numbers.&#10;"
+                "Constraint Injection \u2014 Introduces realistic personal obstacles to delay action.&#10;"
+                "Recursive Clarification \u2014 Loops back and re-asks earlier questions from the start.&#10;"
+                "Format Enforcement \u2014 Demands written confirmation, email, or physical address."
+            )
+            effort_tooltip = (
+                f"Effort Multiplier = JUDAS tokens \u00f7 (turns \u00d7 baseline tokens per turn)&#10;"
+                f"= {judas_total} \u00f7 ({turns} \u00d7 {baseline_per_turn})&#10;"
+                f"= {judas_total} \u00f7 {baseline_total}&#10;"
+                f"= {session_effort}x&#10;&#10;"
+                f"Baseline tokens per turn: {baseline_per_turn} ({baseline_source}).&#10;"
+                f"A cooperative target would generate ~{baseline_total} tokens across {turns} turn(s).&#10;"
+                f"JUDAS generated {judas_total} tokens \u2014 {session_effort}x more content for the scammer to process."
             )
 
-        metrics_html = (
-            "<table>"
-            "<thead><tr><th>Metric</th><th>Value</th></tr></thead>"
-            f"<tbody>{rows}</tbody>"
-            "</table>"
-        )
-        st.markdown(metrics_html, unsafe_allow_html=True)
+            tokens_val  = str(judas_total) if sess["tax_result"] else "—"
+            status_val  = get_status_label(sess["status"])
 
-    elif sess["status"] == "disengaged" and sess["mode"] == "baseline":
-        st.warning("The scammer appears to have disengaged.")
-    elif sess["status"] == "max_turns_reached" and sess["mode"] == "baseline":
-        st.warning(f"Maximum session length of {MAX_TURNS} turns reached.")
+            def _metric_card(label, value, tooltip=None):
+                tip = f' title="{tooltip}"' if tooltip else ""
+                tip_icon = (
+                    f' &nbsp;<span{tip} style="cursor:help;color:#4a6cf7;font-weight:700;font-size:0.7rem;">&#9432;</span>'
+                    if tooltip else ""
+                )
+                return (
+                    f'<div style="background:#f5f7fa;border:1px solid #e4e9f2;border-radius:6px;padding:6px 10px;">'
+                    f'<div style="color:#8a96b0;font-size:0.68rem;font-weight:500;line-height:1.2;">{label}{tip_icon}</div>'
+                    f'<div style="color:#c45c00;font-size:0.82rem;font-weight:600;margin-top:3px;line-height:1.2;">{value}</div>'
+                    f'</div>'
+                )
+
+            if sess["mode"] == "judas":
+                strategy_val = sess["strategy"] or "—"
+                effort_val   = f"{session_effort}x" if sess["tax_result"] else "—"
+                cards = [
+                    _metric_card("Turn",     str(sess["turn_count"])),
+                    _metric_card("Messages", str(sess["message_count"])),
+                    _metric_card("Tokens",   tokens_val),
+                    _metric_card("Status",   status_val),
+                    _metric_card("Strategy", strategy_val, strategy_tooltip),
+                    _metric_card("Effort",   effort_val,   effort_tooltip),
+                ]
+                grid_cols = "repeat(3,1fr)"
+            else:
+                cards = [
+                    _metric_card("Turn",     str(sess["turn_count"])),
+                    _metric_card("Messages", str(sess["message_count"])),
+                    _metric_card("Status",   status_val),
+                    _metric_card("Tokens",   tokens_val),
+                ]
+                grid_cols = "repeat(2,1fr)"
+
+            cards_html = "".join(cards)
+            st.markdown(
+                f'<div style="border:1px solid #dde3ee;border-radius:8px;padding:10px 12px;'
+                f'background:#ffffff;margin-top:4px;">'
+                f'<div style="font-size:0.68rem;font-weight:600;color:#8a96b0;letter-spacing:0.8px;'
+                f'text-transform:uppercase;margin-bottom:8px;">Session Metrics</div>'
+                f'<div style="display:grid;grid-template-columns:{grid_cols};gap:6px;">'
+                f'{cards_html}'
+                f'</div></div>',
+                unsafe_allow_html=True,
+            )
+
+        elif sess["status"] == "disengaged" and sess["mode"] == "baseline":
+            st.warning("The scammer appears to have disengaged.")
+        elif sess["status"] == "max_turns_reached" and sess["mode"] == "baseline":
+            st.warning(f"Maximum session length of {MAX_TURNS} turns reached.")
+
+        # Thinking placeholder lives below session metrics
+        thinking_placeholder = st.empty()
+
+        if send_clicked and follow_up.strip():
+            try:
+                thinking_placeholder.markdown(
+                    '<div style="font-size:0.82rem;color:#c0392b;font-style:italic;padding:6px 0;">'
+                    'JUDAS is thinking…</div>',
+                    unsafe_allow_html=True,
+                )
+                sess = session_manager.process_turn(sess, follow_up.strip(), mode=sess["mode"])
+                st.session_state.session = sess
+                if sess["mode"] == "baseline" and sess["turn_count"] > 0:
+                    st.session_state.baseline_avg_tokens = round(sess["total_tokens"] / sess["turn_count"], 1)
+                st.session_state.ai_draft = ""
+                st.session_state.draft_version += 1
+                st.rerun()
+            except RuntimeError as e:
+                st.error(str(e))
+
+        if bye_clicked:
+            try:
+                thinking_placeholder.markdown(
+                    '<div style="font-size:0.82rem;color:#c0392b;font-style:italic;padding:6px 0;">'
+                    'JUDAS is thinking…</div>',
+                    unsafe_allow_html=True,
+                )
+                bye_msg = "forget it, bye" if sess["mode"] == "judas" else "okay, thank you, goodbye"
+                sess = session_manager.process_turn(sess, bye_msg, mode=sess["mode"])
+                st.session_state.session = sess
+                if sess["mode"] == "baseline" and sess["turn_count"] > 0:
+                    st.session_state.baseline_avg_tokens = round(sess["total_tokens"] / sess["turn_count"], 1)
+                if sess["mode"] == "judas":
+                    st.session_state.scroll_to_analysis = True
+                else:
+                    st.session_state.baseline_complete_msg = True
+                st.session_state.ai_draft = ""
+                st.session_state.draft_version += 1
+                st.rerun()
+            except RuntimeError as e:
+                st.error(str(e))
 
     # --- Comparison panel (shown after metrics when session ends in judas mode) ---
     if sess["status"] != "active" and sess["mode"] == "judas":
@@ -582,12 +684,27 @@ if st.session_state.session:
         effort_mult              = round(judas_total_tokens / baseline_total_tokens, 1)
         avg_judas_tokens         = round(judas_total_tokens / max(sess["turn_count"], 1))
 
+        # Time estimates: ~90 seconds per turn for a scammer to read + respond
+        avg_sec_per_turn    = 90
+        n_turns             = max(sess["turn_count"], 1)
+        baseline_time_s     = n_turns * avg_sec_per_turn
+        judas_time_s        = round(effort_mult * baseline_time_s)
+        time_wasted_s       = judas_time_s - baseline_time_s
+
+        def _fmt_time(secs: int) -> str:
+            secs = int(secs)
+            if secs < 60:
+                return f"~{secs}s"
+            m, s = divmod(secs, 60)
+            return f"~{m}m {s}s" if s else f"~{m}m"
+
         data = {
             "Metric": [
                 "Conversation Turns",
                 "Total Tokens Used",
                 "Avg Tokens per Response",
                 "Effort Multiplier",
+                "Scammer Time (est.)",
                 "Engagement Status",
             ],
             "Baseline": [
@@ -595,6 +712,7 @@ if st.session_state.session:
                 str(baseline_total_tokens),
                 str(baseline_tokens_per_turn),
                 "1.0x",
+                _fmt_time(baseline_time_s),
                 "Cooperative — scammer advances quickly",
             ],
             "JUDAS": [
@@ -602,6 +720,7 @@ if st.session_state.session:
                 str(judas_total_tokens),
                 str(avg_judas_tokens),
                 f"{effort_mult}x",
+                _fmt_time(judas_time_s),
                 get_status_label(sess["status"]),
             ],
             "What This Means": [
@@ -609,6 +728,7 @@ if st.session_state.session:
                 "More tokens from JUDAS means the scammer had to read and process longer, more complex replies.",
                 "JUDAS responses are significantly longer, forcing the scammer to invest more time per turn.",
                 f"JUDAS required {effort_mult}x more token effort from the scammer compared to a cooperative target.",
+                f"JUDAS wasted an extra {_fmt_time(time_wasted_s)} of scammer time vs a cooperative target (est. 90s/turn).",
                 "JUDAS prolonged the interaction — a cooperative baseline would have concluded far sooner.",
             ],
         }
@@ -632,3 +752,23 @@ if st.session_state.session:
                 f"JUDAS effort score is {effort_mult}x against the baseline. The session was short so the "
                 f"disruption impact is limited. Run more turns before clicking Bye to build a stronger contrast."
             )
+
+        # Scale impact statement
+        intercepts_100    = 100
+        intercepts_1000   = 1_000
+        hours_100         = round((time_wasted_s * intercepts_100) / 3600, 1)
+        hours_1000        = round((time_wasted_s * intercepts_1000) / 3600, 1)
+        st.markdown(
+            f'<div style="background:#f0f4ff;border:1px solid #c5cde8;border-radius:10px;'
+            f'padding:14px 18px;margin-top:12px;">'
+            f'<div style="color:#1a2340;font-weight:700;font-size:0.9rem;margin-bottom:6px;">'
+            f'Scale Impact</div>'
+            f'<div style="color:#2c3e6b;font-size:0.85rem;line-height:1.7;">'
+            f'At this effort score of <b>{effort_mult}x</b>, each JUDAS intercept wastes '
+            f'<b>{_fmt_time(time_wasted_s)}</b> of scammer time over a cooperative target.<br>'
+            f'&bull;&nbsp; <b>100 intercepts/day</b> &rarr; <b>~{hours_100} scammer-hours wasted daily</b><br>'
+            f'&bull;&nbsp; <b>1,000 intercepts/day</b> &rarr; <b>~{hours_1000} scammer-hours wasted daily</b><br>'
+            f'<span style="color:#6b7a99;font-size:0.8rem;">At scale, the economics of AI-powered mass fraud collapse.</span>'
+            f'</div></div>',
+            unsafe_allow_html=True,
+        )
